@@ -1,0 +1,77 @@
+# ============================================================================
+# Cấu hình cho SITE 1: ${DOMAIN}
+# Muốn thêm web thứ 2 sau này: copy file này thành site2.conf.template,
+# đổi ${DOMAIN} -> ${DOMAIN2}, đổi root sang volume riêng của site đó,
+# rồi khai báo DOMAIN2 trong .env và volume mới trong docker-compose.yml.
+# ============================================================================
+
+# Image nginx tự thay ${DOMAIN} bằng biến môi trường lúc khởi động.
+# Biến của Nginx như $host, $uri KHÔNG bị thay (chúng không phải biến môi trường).
+
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    # Let's Encrypt xác thực domain qua thư mục này (HTTP-01).
+    # Phải đặt TRƯỚC block redirect, nếu không challenge bị đá sang HTTPS và fail.
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    # Ảnh CCCD scan có thể khá nặng - nới giới hạn upload
+    client_max_body_size 20m;
+
+    # Bật HSTS sau khi đã chắc chắn HTTPS chạy ổn (tuỳ chọn)
+    # add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # File tĩnh của Vue, lấy từ volume do service "web" đổ vào
+    root  /srv/www/cccd;
+    index index.html;
+
+    # Vue Router history mode - mọi route client-side đều fallback về index.html
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Asset do Vite build ra đã có hash trong tên file -> cache dài vô tư
+    location /assets/ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # Chuyển tiếp mọi gọi API sang service "api" trong cùng docker network.
+    # Nhờ đây trình duyệt luôn gọi cùng-origin, không dính CORS/mixed-content.
+    location /api/ {
+        proxy_pass http://api:3000/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    gzip on;
+    gzip_vary on;
+    gzip_types text/plain text/css application/javascript application/json image/svg+xml;
+}

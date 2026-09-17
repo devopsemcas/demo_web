@@ -1,0 +1,97 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-qraeh}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      # Chỉ chạy 1 LẦN DUY NHẤT lúc data directory còn trống (container mới toanh).
+      # Nếu bạn đã có sẵn database cũ, việc thêm cột/index phải chạy tay bằng
+      # `db/init.sql` hoặc `api/migration.sql`.
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-qraeh}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  api:
+    build: ./api
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-qraeh}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      WEB_ORIGIN: ${WEB_ORIGIN:-*}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [internal]
+    # Bỏ comment nếu muốn gọi thẳng API từ máy host (vd: debug bằng Postman)
+    # ports:
+    #   - "${API_PORT:-3000}:3000"
+
+  # KHÔNG còn là web server nữa. Container này chạy một lần, đổ bản build
+  # của Vue vào volume web_dist rồi thoát (trạng thái "Exited (0)" là ĐÚNG).
+  web:
+    build: ./web
+    restart: "no"
+    volumes:
+      - web_dist:/output
+    # Không cần vào network internal vì nó chỉ ghi file, không gọi ai cả.
+
+  # Nginx DUY NHẤT: cửa ngõ ra internet, serve file tĩnh của mọi site,
+  # proxy /api/ về backend, và lo TLS.
+  proxy:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"     # bắt buộc mở để Let's Encrypt xác thực domain (HTTP-01)
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+      # Thêm web sau này thì khai báo tiếp ở đây, vd:
+      # DOMAIN2: ${DOMAIN2}
+    volumes:
+      - ./proxy/templates:/etc/nginx/templates:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+      - web_dist:/srv/www/cccd:ro
+      # Site thứ 2 sau này thêm volume riêng, vd:
+      # - web2_dist:/srv/www/site2:ro
+    depends_on:
+      web:
+        # Chỉ start sau khi container web copy xong dist, tránh cảnh
+        # Nginx lên trước mà thư mục còn rỗng -> trả 404.
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+    networks: [internal]
+    # Certbot gia hạn cert ở container khác nên Nginx không tự biết -> cứ 6 tiếng
+    # reload một lần để nạp cert mới. Vẫn gọi /docker-entrypoint.sh để phần
+    # envsubst xử lý các file template ở trên chạy bình thường.
+    command: ["/bin/sh", "-c", "while :; do sleep 6h & wait $${!}; nginx -s reload; done & /docker-entrypoint.sh nginx -g \"daemon off;\""]
+
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    # Thử gia hạn mỗi 12 tiếng. Certbot tự bỏ qua nếu cert còn hạn > 30 ngày,
+    # nên chạy thường xuyên là an toàn và được khuyến nghị.
+    entrypoint: ["/bin/sh", "-c", "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done"]
+
+networks:
+  internal:
+
+volumes:
+  db_data:
+  web_dist:

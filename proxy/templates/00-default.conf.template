@@ -1,0 +1,21 @@
+# ============================================================================
+# Server mặc định - bắt mọi request KHÔNG khớp domain nào đã khai báo.
+# Quan trọng khi chạy nhiều site trên cùng một Nginx: nếu không có block này,
+# ai gõ thẳng IP server hoặc một domain lạ trỏ về đây sẽ vô nhầm site đầu tiên.
+# File đánh số 00 để nginx nạp trước các file site (nạp theo thứ tự alphabet).
+# ============================================================================
+
+server {
+    listen 80 default_server;
+    server_name _;
+    return 444;   # đóng kết nối, không trả nội dung gì
+}
+
+server {
+    listen 443 ssl default_server;
+    server_name _;
+
+    # Từ chối ngay ở bước bắt tay TLS, nhờ vậy không cần khai báo
+    # chứng chỉ giả cho server mặc định (yêu cầu Nginx >= 1.19.4).
+    ssl_reject_handshake on;
+}

@@ -1,0 +1,13 @@
+node_modules
+dist
+.git
+.gitignore
+npm-debug.log*
+Dockerfile
+docker-compose.yml
+.dockerignore
+README-DOCKER.md
+
+# Quan trọng: bỏ qua .env gốc của project để VITE_API_URL truyền qua
+# --build-arg / docker-compose args không bị ghi đè.
+.env
