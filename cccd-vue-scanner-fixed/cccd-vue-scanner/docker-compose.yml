@@ -1,0 +1,15 @@
+services:
+  cccd-vue-scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Đổi thành địa chỉ backend thật của bạn, hoặc set biến VITE_API_URL
+        # trong file .env cùng cấp (KHÔNG phải .env của project Vue) trước khi chạy compose.
+        VITE_API_URL: ${VITE_API_URL:-http://10.0.40.120:3000}
+    image: cccd-vue-scanner:latest
+    container_name: cccd-vue-scanner
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped

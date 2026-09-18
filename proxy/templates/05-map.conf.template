@@ -1,0 +1,19 @@
+# ============================================================================
+# Map dùng chung cho mọi site: quyết định có nên redirect HTTP -> HTTPS hay không.
+#
+# Vì sao cần: nếu domain đang chạy qua Cloudflare (hoặc CDN/reverse-proxy khác)
+# ở chế độ "Flexible" (hoặc tương tự), trình duyệt gọi HTTPS nhưng Cloudflare lại
+# nối tới server này bằng HTTP thuần. Nếu Nginx cứ thấy HTTP là redirect sang
+# HTTPS vô điều kiện -> Cloudflare nhận redirect, lại gọi lại -> lặp vô hạn
+# -> trình duyệt báo ERR_TOO_MANY_REDIRECTS.
+#
+# Cloudflare (và hầu hết CDN/reverse-proxy tử tế) luôn gửi kèm header
+# X-Forwarded-Proto đúng bằng giao thức mà TRÌNH DUYỆT đã dùng, dù nó nối
+# xuống origin bằng HTTP hay HTTPS. Nên: nếu header đó đã là "https" thì
+# không cần redirect nữa, cứ phục vụ nội dung luôn.
+# ============================================================================
+
+map "$scheme:$http_x_forwarded_proto" $should_redirect_https {
+    default        1;   # HTTP thuần, không có proxy nào phía trước -> redirect
+    "http:https"   0;   # HTTP thuần NHƯNG có proxy/CDN phía trước đã lo HTTPS rồi -> đừng redirect nữa
+}
